@@ -1,0 +1,13 @@
+node_modules/
+dist/
+dist-electron/
+*.log
+.DS_Store
+.vscode/
+.idea/
+*.pyc
+__pycache__/
+.many-agents/
+*.exe
+*.msi
+build/icon.ico
