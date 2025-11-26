@@ -6,15 +6,17 @@ Many-Agents Python 后端服务
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
-import threading
 import json
 import os
 from pathlib import Path
+import traceback
 
 app = Flask(__name__)
 CORS(app)
 
 # 浏览器实例和页面管理
+playwright = None
+browser = None
 browser_context = None
 pages = {}
 responses = {}
@@ -58,21 +60,29 @@ MODELS = {
 
 def init_browser():
     """初始化浏览器"""
-    global browser_context
+    global playwright, browser, browser_context
     
-    playwright = sync_playwright().start()
-    browser = playwright.chromium.launch(
-        headless=False,  # 非无头模式，用户可以看到浏览器
-        args=['--start-maximized']
-    )
-    
-    # 创建持久化上下文，保存登录状态
-    browser_context = browser.new_context(
-        viewport={'width': 1920, 'height': 1080},
-        user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-    )
-    
-    return browser_context
+    try:
+        print('正在初始化 Playwright...')
+        playwright = sync_playwright().start()
+        print('正在启动 Chromium 浏览器...')
+        browser = playwright.chromium.launch(
+            headless=False,
+            args=['--start-maximized']
+        )
+        
+        print('正在创建浏览器上下文...')
+        browser_context = browser.new_context(
+            viewport={'width': 1920, 'height': 1080},
+            user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        )
+        
+        print('浏览器初始化完成！')
+        return browser_context
+    except Exception as e:
+        print(f'浏览器初始化失败: {str(e)}')
+        traceback.print_exc()
+        return None
 
 
 def load_cookies(model_id):
@@ -87,38 +97,52 @@ def load_cookies(model_id):
             return None
     return None
 
-
-def save_cookies(model_id, cookies):
-    """保存指定模型的 cookies"""
-    cookie_file = STATE_DIR / f'{model_id}_cookies.json'
-    with open(cookie_file, 'w', encoding='utf-8') as f:
-        json.dump(cookies, f)
-
-
 @app.route('/open-login', methods=['POST'])
 def open_login():
     """打开登录页面"""
     global browser_context, pages
     
-    data = request.json
-    model_id = data.get('modelId')
-    url = data.get('url')
-    
-    if not browser_context:
-        init_browser()
-    
     try:
+        data = request.json
+        model_id = data.get('modelId')
+        url = data.get('url')
+        
+        print(f'收到登录请求: model_id={model_id}, url={url}')
+        
+        if not browser_context:
+            print('浏览器未初始化，正在初始化...')
+            init_browser()
+            if not browser_context:
+                return jsonify({'success': False, 'error': '浏览器初始化失败'}), 500
+        
         # 创建新页面或使用现有页面
         if model_id in pages:
             page = pages[model_id]
+            print(f'使用现有页面: {model_id}')
         else:
+            print(f'创建新页面: {model_id}')
             page = browser_context.new_page()
             pages[model_id] = page
             
             # 尝试加载之前保存的 cookies
             cookies = load_cookies(model_id)
             if cookies:
+                print(f'加载 cookies: {model_id}')
                 browser_context.add_cookies(cookies)
+        
+        # 导航到登录页面
+        print(f'导航到: {url}')
+        page.goto(url, wait_until='domcontentloaded', timeout=30000)
+        page.bring_to_front()
+        
+        print(f'{model_id} 登录页面已打开')
+        return jsonify({'success': True, 'message': f'{model_id} 登录页面已打开'})
+    
+    except Exception as e:
+        error_msg = f'打开登录页面失败: {str(e)}'
+        print(error_msg)
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': error_msg}), 500
         
         # 导航到登录页面
         page.goto(url, wait_until='networkidle', timeout=30000)
@@ -127,7 +151,6 @@ def open_login():
     
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
-
 
 @app.route('/ask', methods=['POST'])
 def ask_question():
@@ -145,13 +168,12 @@ def ask_question():
     # 清空之前的回答
     responses = {}
     
-    # 对每个模型发送问题
+    # 直接在主线程中依次发送问题（Playwright 不支持多线程）
     for model_id in model_ids:
-        thread = threading.Thread(
-            target=send_question_to_model,
-            args=(model_id, question, deep_thinking)
-        )
-        thread.start()
+        try:
+            send_question_to_model(model_id, question, deep_thinking)
+        except Exception as e:
+            responses[model_id] = f'错误: {str(e)}'
     
     return jsonify({'success': True, 'message': '问题已发送'})
 
@@ -254,5 +276,5 @@ if __name__ == '__main__':
     # 初始化浏览器
     init_browser()
     
-    # 启动 Flask 服务
-    app.run(host='0.0.0.0', port=5000, debug=False)
+    # 启动 Flask 服务（单线程模式，因为 Playwright 不支持多线程）
+    app.run(host='0.0.0.0', port=5000, debug=False, threaded=False)

@@ -1,96 +1,26 @@
 <template>
-  <div class="many-agents-app">
-    <header class="app-header">
-      <h1>Many-Agents - AI 大模型对话助手</h1>
-    </header>
-
-    <div class="app-content">
-      <!-- 侧边栏：模型选择 -->
-      <aside class="sidebar">
-        <h3>模型选择</h3>
-        <div class="model-list">
-          <el-checkbox-group v-model="selectedModels">
-            <el-checkbox 
-              v-for="model in availableModels" 
-              :key="model.id" 
-              :label="model.id"
-              class="model-checkbox"
-            >
-              {{ model.name }}
-            </el-checkbox>
-          </el-checkbox-group>
-        </div>
-        
-        <div class="login-section">
-          <h3>登录管理</h3>
-          <el-button 
-            v-for="model in selectedModels" 
-            :key="model" 
-            @click="openLoginWindow(model)" 
-            size="small"
-            class="login-btn"
-          >
-            登录 {{ getModelName(model) }}
-          </el-button>
-        </div>
-      </aside>
-
-      <!-- 主区域 -->
-      <main class="main-area">
-        <!-- 输入区域 -->
-        <div class="input-area">
-          <div class="input-controls">
-            <el-checkbox v-model="deepThinking">深度思考</el-checkbox>
-          </div>
-          <el-input
-            v-model="question"
-            type="textarea"
-            :rows="4"
-            placeholder="请输入您的问题..."
-            class="question-input"
-          />
-          <div class="action-buttons">
-            <el-button type="primary" @click="submitQuestion" :loading="isLoading">
-              {{ isLoading ? '提问中...' : '提交问题' }}
-            </el-button>
-            <el-button @click="clearAll">清空</el-button>
-          </div>
-        </div>
-
-        <!-- 回答展示区域 - 标签页 -->
-        <div class="response-area">
-          <el-tabs v-model="activeTab" type="card" class="response-tabs">
-            <el-tab-pane 
-              v-for="model in selectedModels" 
-              :key="model" 
-              :label="getModelName(model)" 
-              :name="model"
-            >
-              <div class="response-content">
-                <div v-if="responses[model] && responses[model].loading" class="loading-indicator">
-                  <el-icon class="is-loading"><Loading /></el-icon>
-                  <span>{{ getModelName(model) }} 正在思考中...</span>
-                </div>
-                <div v-else-if="responses[model] && responses[model].content" class="response-text">
-                  {{ responses[model].content }}
-                </div>
-                <div v-else class="empty-response">
-                  暂无回答
-                </div>
-              </div>
-            </el-tab-pane>
-          </el-tabs>
-        </div>
-      </main>
-    </div>
-  </div>
+  <Layout :availableModels="availableModels" v-model:selectedModels="selectedModels" :openLoginWindow="openLoginWindow">
+    <HomePage
+      :availableModels="availableModels"
+      :selectedModels="selectedModels"
+      v-model:question="question"
+      v-model:deepThinking="deepThinking"
+      :isLoading="isLoading"
+      v-model:activeTab="activeTab"
+      :responses="responses"
+      :getModelName="getModelName"
+      :submitQuestion="submitQuestion"
+      :clearAll="clearAll"
+    />
+  </Layout>
 </template>
 
 <script setup>
 import { ref, reactive } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Loading } from '@element-plus/icons-vue'
 import axios from 'axios'
+import Layout from './layout/Layout.vue'
+import HomePage from './pages/HomePage.vue'
 
 // 可用的大模型列表
 const availableModels = ref([
@@ -129,16 +59,23 @@ const getModelName = (modelId) => {
 
 // 打开登录窗口
 const openLoginWindow = (modelId) => {
+  console.log('App.vue - openLoginWindow called with modelId:', modelId)
   const model = availableModels.value.find(m => m.id === modelId)
+  console.log('Found model:', model)
   if (model) {
+    console.log('Sending request to:', `${BACKEND_URL}/open-login`)
     // 通知后端打开登录窗口
     axios.post(`${BACKEND_URL}/open-login`, { modelId, url: model.url })
-      .then(() => {
+      .then((response) => {
+        console.log('Backend response:', response)
         ElMessage.success(`正在打开 ${model.name} 登录页面...`)
       })
       .catch(error => {
+        console.error('Backend error:', error)
         ElMessage.error(`打开登录页面失败: ${error.message}`)
       })
+  } else {
+    console.error('Model not found for id:', modelId)
   }
 }
 
@@ -238,12 +175,12 @@ const clearAll = () => {
 </script>
 
 <style scoped>
-.many-agents-app {
-  height: 100vh;
+/* Keep minimal global styles here - the components have their own styles */
+/* {
   display: flex;
   flex-direction: column;
   background: #f5f7fa;
-}
+} */
 
 .app-header {
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
